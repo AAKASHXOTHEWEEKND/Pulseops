@@ -1,0 +1,20 @@
+# Copy to staging.tfvars and fill image tags (immutable: git SHA).
+# Example values only — override for your account/region.
+
+environment = "staging"
+aws_region  = "ap-south-1"
+vpc_cidr    = "10.20.0.0/16"
+az_count    = 2
+
+# Images are pushed by CI to ECR; use the git SHA tag, never 'latest'.
+api_image = "<account>.dkr.ecr.ap-south-1.amazonaws.com/pulseops-staging-app:REPLACE_SHA"
+web_image = "<account>.dkr.ecr.ap-south-1.amazonaws.com/pulseops-staging-web:REPLACE_SHA"
+
+api_desired_count    = 2
+worker_desired_count = 1
+db_instance_class    = "db.t4g.micro"
+log_retention_days   = 14
+
+tags = {
+  Owner = "platform-team"
+}

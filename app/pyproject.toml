@@ -1,0 +1,26 @@
+[project]
+name = "pulseops"
+version = "0.1.0"
+description = "PulseOps job-processing platform (API + worker)"
+requires-python = ">=3.12"
+
+[tool.setuptools.packages.find]
+include = ["pulseops*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B"]
+# B008: FastAPI Depends() in defaults is idiomatic.
+# N806: `Session = sessionmaker(...)` is the SQLAlchemy-conventional name.
+ignore = ["B008", "N806"]
+
+[tool.ruff.lint.per-file-ignores]
+# Alembic templates target older typing style; leave them alone.
+"migrations/*" = ["UP007", "UP035"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PulseOps — Job Portal</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="container">
+    <header>
+      <h1>PulseOps</h1>
+      <p class="subtitle">Submit a text job, watch it move QUEUED → PROCESSING → COMPLETED.</p>
+      <p class="api-status">API: <span id="api-indicator" class="dot unknown"></span><span id="api-text">checking…</span></p>
+    </header>
+
+    <section class="card">
+      <form id="job-form">
+        <label for="input">Text input</label>
+        <div class="row">
+          <input id="input" name="input" type="text" placeholder="hello platform" required maxlength="10000" />
+          <button type="submit" id="submit-btn">Submit job</button>
+        </div>
+      </form>
+      <p id="submit-msg" class="msg"></p>
+    </section>
+
+    <section class="card">
+      <div class="row between">
+        <h2>Jobs</h2>
+        <button id="refresh-btn" class="secondary">Refresh</button>
+      </div>
+      <table id="jobs-table">
+        <thead>
+          <tr><th>ID</th><th>Input</th><th>Status</th><th>Result</th><th>Updated</th></tr>
+        </thead>
+        <tbody id="jobs-body">
+          <tr><td colspan="5" class="empty">No jobs yet.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      <span>PulseOps &middot; <span id="version">—</span></span>
+    </footer>
+  </main>
+  <script src="/config.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

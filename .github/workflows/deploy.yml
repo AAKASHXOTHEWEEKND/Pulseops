@@ -1,0 +1,134 @@
+name: Deploy (staging)
+
+# Main-branch deployment pipeline to AWS ECS Fargate.
+#
+# Guarded: only runs when AWS OIDC is configured (vars.AWS_DEPLOY_ROLE_ARN set).
+# Without cloud credentials the CI workflow already provides real deployment
+# evidence via the ephemeral-env smoke test; this pipeline is the cloud path.
+#
+# Flow: build -> push immutable images -> run migrations -> deploy api/worker/web
+#       -> wait for ECS stability -> smoke test -> (auto rollback on failure).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Short-lived credentials via OIDC — no long-lived AWS keys in CI.
+permissions:
+  id-token: write
+  contents: read
+
+# Serialize deploys to the same environment (no concurrent releases).
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_APP: pulseops-staging-app
+  ECR_WEB: pulseops-staging-web
+  CLUSTER: pulseops-staging-cluster
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.check.outputs.enabled }}
+    steps:
+      - id: check
+        run: |
+          if [ -n "${{ vars.AWS_DEPLOY_ROLE_ARN }}" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::AWS_DEPLOY_ROLE_ARN not set — skipping cloud deploy."
+          fi
+
+  deploy:
+    needs: guard
+    if: needs.guard.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    environment: staging # enables GitHub environment protection / approvals
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set immutable tag
+        id: vars
+        run: echo "sha=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build & push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_APP }}:${{ steps.vars.outputs.sha }}
+          build-args: APP_VERSION=${{ steps.vars.outputs.sha }}
+
+      - name: Build & push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: true
+          tags: ${{ steps.ecr.outputs.registry }}/${{ env.ECR_WEB }}:${{ steps.vars.outputs.sha }}
+          build-args: APP_VERSION=${{ steps.vars.outputs.sha }}
+
+      # --- DB migrations run as a one-off ECS task BEFORE the app rolls out. ---
+      # Migrations are written to be backward-compatible (expand/contract) so the
+      # currently-running version keeps working during the rollout.
+      - name: Run database migrations (one-off task)
+        run: |
+          bash infra/scripts/run_migrations.sh \
+            "${{ steps.ecr.outputs.registry }}/${{ env.ECR_APP }}:${{ steps.vars.outputs.sha }}"
+
+      - name: Deploy API service
+        run: |
+          bash infra/scripts/deploy_service.sh api \
+            "${{ steps.ecr.outputs.registry }}/${{ env.ECR_APP }}:${{ steps.vars.outputs.sha }}"
+
+      - name: Deploy worker service
+        run: |
+          bash infra/scripts/deploy_service.sh worker \
+            "${{ steps.ecr.outputs.registry }}/${{ env.ECR_APP }}:${{ steps.vars.outputs.sha }}"
+
+      - name: Deploy web service
+        run: |
+          bash infra/scripts/deploy_service.sh web \
+            "${{ steps.ecr.outputs.registry }}/${{ env.ECR_WEB }}:${{ steps.vars.outputs.sha }}"
+
+      # ECS deployment circuit breaker auto-rolls-back if a service can't
+      # stabilize; this step waits for that verdict.
+      - name: Wait for services to stabilize
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services pulseops-staging-api pulseops-staging-worker pulseops-staging-web
+
+      - name: Resolve ALB URL
+        id: url
+        run: |
+          dns=$(aws elbv2 describe-load-balancers \
+            --names pulseops-staging-alb \
+            --query 'LoadBalancers[0].DNSName' --output text)
+          echo "base=http://$dns" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the live deployment
+        run: python scripts/smoke_test.py --base-url "${{ steps.url.outputs.base }}" --timeout 90
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "### Deploy summary"
+            echo "- Image tag: \`${{ steps.vars.outputs.sha }}\`"
+            echo "- URL: ${{ steps.url.outputs.base }}"
+          } >> "$GITHUB_STEP_SUMMARY"

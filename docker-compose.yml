@@ -1,0 +1,110 @@
+# Local / CI reproducible environment: web -> api -> db, api -> queue -> worker.
+# Bring up with:  docker compose up --build
+# The exact same api/worker image is used for both services (promotion parity).
+name: pulseops
+
+x-app-image: &app-image
+  build:
+    context: ./app
+    args:
+      APP_VERSION: ${APP_VERSION:-local}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: pulseops
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pulseops}
+      POSTGRES_DB: pulseops
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulseops"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # DB is private: no host port published.
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # One-shot migration runner. API/worker wait for it to finish successfully.
+  migrate:
+    <<: *app-image
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://pulseops:${POSTGRES_PASSWORD:-pulseops}@db:5432/pulseops
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app-image
+    environment:
+      DATABASE_URL: postgresql+psycopg://pulseops:${POSTGRES_PASSWORD:-pulseops}@db:5432/pulseops
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: local
+      APP_VERSION: ${APP_VERSION:-local}
+      BREAK_READINESS: ${BREAK_READINESS:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    <<: *app-image
+    command: ["python", "-m", "pulseops.worker"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://pulseops:${POSTGRES_PASSWORD:-pulseops}@db:5432/pulseops
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: local
+      APP_VERSION: ${APP_VERSION:-local}
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Worker exposes its own health/metrics server on 8080 (not published).
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        APP_VERSION: ${APP_VERSION:-local}
+    environment:
+      API_UPSTREAM: api:8000
+      API_BASE_URL: ""   # same-origin; nginx proxies /api -> api:8000
+    depends_on:
+      - api
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
+  redisdata:
