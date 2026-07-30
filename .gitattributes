@@ -1,0 +1,15 @@
+# Normalize line endings. Shell scripts and container-bound files must stay LF
+# so they run correctly on the Linux hosts (EC2, CI, containers).
+* text=auto eol=lf
+
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Binary files (leave untouched)
+*.png binary
+*.jpg binary
+*.gif binary
+*.pdf binary
