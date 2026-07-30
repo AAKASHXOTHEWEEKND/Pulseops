@@ -94,7 +94,7 @@ jobs:
           tags: pulseops-web:${{ steps.vars.outputs.sha }}
           build-args: APP_VERSION=${{ steps.vars.outputs.sha }}
       - name: Trivy scan (API image)
-        uses: aquasecurity/trivy-action@v0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: pulseops-app:${{ steps.vars.outputs.sha }}
           format: table
