@@ -24,3 +24,6 @@ ignore = ["B008", "N806"]
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+# Ensure the `pulseops` package is importable when pytest is invoked as a bare
+# command (CI), not just via `python -m pytest` (which adds cwd to sys.path).
+pythonpath = ["."]

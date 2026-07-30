@@ -56,9 +56,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Run the gitleaks CLI directly (pinned image) rather than the v2 action,
+      # which requires a GITLEAKS_LICENSE for org accounts and exits non-zero
+      # even with zero findings. This fails the job only on a real leak.
+      - name: gitleaks detect
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/repo" \
+            zricethezav/gitleaks:v8.21.2 detect \
+            --source=/repo --redact --verbose --no-banner
 
   build-scan:
     name: Build images & vulnerability scan
